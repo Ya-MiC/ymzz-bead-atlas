@@ -1,0 +1,129 @@
+{
+  "schema_version": "1.0",
+  "data_source": "maxcleme/beadcolors",
+  "data_commit": "f97ff4283d03cef5cd7e1071a86f5892e0c0c61b",
+  "data_license": "MIT",
+  "data_note": "所有色卡數值為螢幕參考值，來自社群對實物豆的取樣平均，不等同廠商保證的實物顏色。",
+  "brands": [
+    {
+      "id": "mard",
+      "name": "MARD",
+      "display": "MARD 拼豆（5mm 中豆）",
+      "file": "mard.csv",
+      "bead_mm": 5.0,
+      "family": "中豆"
+    },
+    {
+      "id": "hama",
+      "name": "Hama Midi",
+      "display": "Hama Midi（5mm 中豆）",
+      "file": "hama.csv",
+      "bead_mm": 5.0,
+      "family": "中豆"
+    },
+    {
+      "id": "hama_mini",
+      "name": "Hama Mini",
+      "display": "Hama Mini（2.6mm 小豆）",
+      "file": "hama_mini.csv",
+      "bead_mm": 2.6,
+      "family": "小豆"
+    },
+    {
+      "id": "hama_maxi",
+      "name": "Hama Maxi",
+      "display": "Hama Maxi（10mm 大豆）",
+      "file": "hama_maxi.csv",
+      "bead_mm": 10.0,
+      "family": "大豆"
+    },
+    {
+      "id": "perler",
+      "name": "Perler",
+      "display": "Perler（5mm 中豆）",
+      "file": "perler.csv",
+      "bead_mm": 5.0,
+      "family": "中豆"
+    },
+    {
+      "id": "perler_mini",
+      "name": "Perler Mini",
+      "display": "Perler Mini（2.6mm 小豆）",
+      "file": "perler_mini.csv",
+      "bead_mm": 2.6,
+      "family": "小豆"
+    },
+    {
+      "id": "perler_caps",
+      "name": "Perler Caps",
+      "display": "Perler Caps（帽珠）",
+      "file": "perler_caps.csv",
+      "bead_mm": 5.0,
+      "family": "帽珠"
+    },
+    {
+      "id": "nabbi",
+      "name": "Nabbi",
+      "display": "Nabbi（5mm 中豆）",
+      "file": "nabbi.csv",
+      "bead_mm": 5.0,
+      "family": "中豆"
+    },
+    {
+      "id": "artkal_a",
+      "name": "Artkal A",
+      "display": "Artkal A 系列（5mm 中豆）",
+      "file": "artkal_a.csv",
+      "bead_mm": 5.0,
+      "family": "中豆"
+    },
+    {
+      "id": "artkal_c",
+      "name": "Artkal C",
+      "display": "Artkal C 系列（5mm 中豆）",
+      "file": "artkal_c.csv",
+      "bead_mm": 5.0,
+      "family": "中豆"
+    },
+    {
+      "id": "artkal_m",
+      "name": "Artkal M",
+      "display": "Artkal M 系列（5mm 中豆）",
+      "file": "artkal_m.csv",
+      "bead_mm": 5.0,
+      "family": "中豆"
+    },
+    {
+      "id": "artkal_r",
+      "name": "Artkal R",
+      "display": "Artkal R 系列（5mm 中豆）",
+      "file": "artkal_r.csv",
+      "bead_mm": 5.0,
+      "family": "中豆"
+    },
+    {
+      "id": "artkal_s",
+      "name": "Artkal S",
+      "display": "Artkal S 系列（5mm 中豆）",
+      "file": "artkal_s.csv",
+      "bead_mm": 5.0,
+      "family": "中豆"
+    },
+    {
+      "id": "yant",
+      "name": "Yant",
+      "display": "Yant（5mm 中豆）",
+      "file": "yant.csv",
+      "bead_mm": 5.0,
+      "family": "中豆"
+    },
+    {
+      "id": "diamonddotz",
+      "name": "Diamond Dotz",
+      "display": "Diamond Dotz（5mm 鑽石畫點）",
+      "file": "diamondDotz.csv",
+      "bead_mm": 5.0,
+      "family": "鑽石畫"
+    }
+  ]
+}

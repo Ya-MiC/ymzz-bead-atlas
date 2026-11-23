@@ -1,0 +1,9 @@
+{
+  "name": "默认1",
+  "brand": "mard",
+  "overrides": {
+    "A1": "#FAF5CD",
+    "H7": "#050505"
+  },
+  "extra_colors": []
+}
