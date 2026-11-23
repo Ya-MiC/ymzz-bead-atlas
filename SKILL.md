@@ -1,6 +1,6 @@
 ---
-name: bead-atlas
-description: "把 JPG、PNG、WebP、BMP、GIF 圖片轉成可直接製作的多品牌拼豆圖紙：逐格讀取來源 RGB 與 #RRGGBB，以 CIEDE2000 色差對應 MARD、Hama、Perler、Artkal、Nabbi、Yant、Diamond Dotz 等 15 個品牌共 2093 個色號，輸出帶色號的 PNG/SVG 圖紙、效果預覽、逐格座標與 ΔE00、逐色顆數與備損採購清單。支援使用者依實體色卡覆寫預設色值、新增自訂色，並把自己的色群存成具名預設（默認1、默認2 或自訂名稱）重複使用。適用於圖片轉拼豆、像素畫轉色號、HEX 查色卡、拼豆備料與成本估算。不適用於保證實物零色差、跨品牌色號互通，或在未接服務端時宣稱已完成付費扣款。"
+name: ymzz-bead-atlas
+description: "晏銘湛箴_拼豆圖譜（YMZZ Bead Atlas）。把 JPG、PNG、WebP、BMP、GIF 圖片轉成可直接製作的多品牌拼豆圖紙：逐格讀取來源 RGB 與 #RRGGBB，以 CIEDE2000 色差對應 MARD、Hama、Perler、Artkal、Nabbi、Yant、Diamond Dotz 等 15 個品牌共 2093 個色號，輸出帶色號的 PNG/SVG 圖紙、效果預覽、逐格座標與 ΔE00、逐色顆數與備損採購清單。支援使用者依實體色卡覆寫預設色值、新增自訂色，並把自己的色群存成具名預設（默認1、默認2 或自訂名稱）重複使用。適用於圖片轉拼豆、像素畫轉色號、HEX 查色卡、拼豆備料與成本估算。不適用於保證實物零色差、跨品牌色號互通，或在未接服務端時宣稱已完成付費扣款。"
 metadata:
   version: "1.0.0"
   author: "晏銘湛箴 / YanMing Cao"
@@ -9,7 +9,7 @@ metadata:
   tags: ["perler-beads", "mard", "hama", "perler", "artkal", "color-matching", "pattern", "material-list"]
 ---
 
-# Bead Atlas · 拼豆圖譜
+# YMZZ Bead Atlas · 晏銘湛箴_拼豆圖譜
 
 把一張圖片轉成能逐格製作、能逐格核色、能直接備料的拼豆圖紙。全程在本機完成，不上傳圖片，不含任何帳號、金鑰或付費邏輯。
 

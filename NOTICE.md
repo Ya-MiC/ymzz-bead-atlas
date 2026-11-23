@@ -58,7 +58,7 @@ REA（Reverse Engineer Anything），MIT 许可，https://github.com/morluto/rea
 
 Jett-Wu/Perler_Beads_Generator，MIT 许可，https://github.com/Jett-Wu/Perler_Beads_Generator 。
 
-本專案僅分析其公開構建產物以理解同類產品的做法與能力邊界，未複製其任何程式碼、演算法參數或原始檔案。Bead Atlas 的實作、資料結構、介面與輸出格式皆為獨立撰寫。
+本專案僅分析其公開構建產物以理解同類產品的做法與能力邊界，未複製其任何程式碼、演算法參數或原始檔案。YMZZ Bead Atlas 的實作、資料結構、介面與輸出格式皆為獨立撰寫。
 
 ## 4. 執行期相依
 

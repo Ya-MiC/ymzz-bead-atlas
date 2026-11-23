@@ -38,8 +38,8 @@ def validate():
     frontmatter = match.group(1)
     name = re.search(r"^name:\s*([a-z0-9-]+)\s*$", frontmatter, re.MULTILINE)
     description = re.search(r'^description:\s*"(.*)"\s*$', frontmatter, re.MULTILINE)
-    if not name or name.group(1) != "bead-atlas":
-        raise ValueError("Skill name 必須為 bead-atlas")
+    if not name or name.group(1) != "ymzz-bead-atlas":
+        raise ValueError("Skill name 必須為 ymzz-bead-atlas")
     if not description or not 1 <= len(description.group(1)) <= 1024:
         raise ValueError("Skill description 缺失或超過 1024 字元")
     if "<" in description.group(1) or ">" in description.group(1):
@@ -91,7 +91,7 @@ def package(output):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", type=Path, default=ROOT / "dist" / "bead-atlas.zip")
+    parser.add_argument("--output", type=Path, default=ROOT / "dist" / "ymzz-bead-atlas.zip")
     args = parser.parse_args()
     print(json.dumps(package(args.output.resolve()), ensure_ascii=False, indent=2))
 

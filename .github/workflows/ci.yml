@@ -22,7 +22,7 @@ jobs:
       - run: python scripts/package.py
       - uses: actions/upload-artifact@v4
         with:
-          name: bead-atlas-skill
-          path: dist/bead-atlas.zip
+          name: ymzz-bead-atlas-skill
+          path: dist/ymzz-bead-atlas.zip
           if-no-files-found: error
           retention-days: 30

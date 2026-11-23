@@ -499,7 +499,7 @@ def convert(args):
     board_rows = math.ceil(height / args.board_height)
     usage = {
         "schema_version": "1.0",
-        "product": "Bead Atlas",
+        "product": "YMZZ Bead Atlas · 晏銘湛箴_拼豆圖譜",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "brand": {
             "id": brand_id,

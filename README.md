@@ -1,12 +1,14 @@
-# Bead Atlas · 拼豆圖譜
+# YMZZ Bead Atlas · 晏銘湛箴_拼豆圖譜
 
 把一張圖片轉成能逐格製作、能逐格核色、能直接備料的拼豆圖紙。Claude Skill 格式，可安裝到 Codex、Claude Code、WorkBuddy、Cursor 等支援 Agent Skills 的環境。
+
+倉庫：https://github.com/Ya-MiC/ymzz-bead-atlas
 
 ## 1. 解決什麼問題
 
 1. 拼豆創作者真正的卡點不是把圖片縮小，而是把每一格換成買得到的色號，再一種一種數清楚。
 2. 同類工具多為瀏覽器單頁應用，色卡寫死、只能選一個品牌、輸出沒有色差證據，也無法直接變成 Agent 可呼叫的能力。
-3. Bead Atlas 把這件事做成可安裝、可腳本化、可稽核的 Skill：多品牌色卡、使用者可改色值、可存成自己的色群預設、每格留下 ΔE00 證據。
+3. YMZZ Bead Atlas 把這件事做成可安裝、可腳本化、可稽核的 Skill：多品牌色卡、使用者可改色值、可存成自己的色群預設、每格留下 ΔE00 證據。
 
 ## 2. 能力
 
