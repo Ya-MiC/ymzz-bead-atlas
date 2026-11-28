@@ -15,6 +15,15 @@
   --ba-surface-2: var(--dsw-alias-bg-layer-2, #F8F6EF);
   --ba-border: var(--dsw-alias-border-l2, rgba(61, 56, 51, 0.14));
   --ba-error: var(--dsw-alias-state-error-primary, #B3261E);
+  /* Grid layers (read by the canvas). Neutrals and ink from tokens.css; no new hue. */
+  --ba-check-a: #F8F6EF;                     /* 暖紙白 */
+  --ba-check-b: rgba(61, 56, 51, 0.14);      /* ink-1 at a low alpha */
+  --ba-veil: rgba(248, 246, 239, 0.74);      /* paper veil over other codes */
+  --ba-ring: #3D3833;                        /* ink-1 */
+  --ba-grid-line: rgba(61, 56, 51, 0.12);
+  /* Lift: a smaller step of --shadow-rest (0 8px 24px rgba(61,56,51,.10)); derived. */
+  --ba-lift-shadow: 0 3px 8px rgba(61, 56, 51, 0.22);
+  --ba-ease-ink: cubic-bezier(.16, 1, .3, 1); /* tokens.css --ease-ink */
   box-sizing: border-box;
   height: 100%;
   overflow: auto;
@@ -39,6 +48,12 @@
   --ba-surface: var(--dsw-alias-bg-layer-1, #1F1D1A);
   --ba-surface-2: var(--dsw-alias-bg-layer-2, #2A2723);
   --ba-border: var(--dsw-alias-border-l2, rgba(230, 225, 213, 0.16));
+  --ba-check-a: #2A241D;                     /* 暮靄 bg-1 */
+  --ba-check-b: rgba(230, 225, 213, 0.10);
+  --ba-veil: rgba(31, 27, 22, 0.74);         /* bg-0 veil */
+  --ba-ring: #E6E1D5;                        /* dark ink-1 */
+  --ba-grid-line: rgba(230, 225, 213, 0.10);
+  --ba-lift-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
 }
 
 .page *, .page *::before, .page *::after { box-sizing: border-box; }
@@ -228,6 +243,102 @@
 .historyMain { display: flex; flex-direction: column; min-width: 0; }
 .historyActions { display: flex; gap: 4px; flex-wrap: wrap; }
 .jobId { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: var(--ba-ink-2); }
+
+/* Interactive grid */
+.gridBlock { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.gridStage {
+  max-height: 560px;
+  overflow: auto;
+  border: 1px solid var(--ba-border);
+  border-radius: 12px;
+  background: var(--ba-paper);
+  padding: 8px;
+}
+.gridSurface { position: relative; margin: 0 auto; touch-action: none; cursor: crosshair; outline: none; }
+.gridSurface:focus-visible { outline: 2px solid var(--ba-accent); outline-offset: 3px; box-shadow: 0 0 0 6px color-mix(in srgb, var(--ba-accent) 35%, transparent); }
+.gridCanvas { position: absolute; inset: 0; display: block; pointer-events: none; image-rendering: pixelated; }
+/* The hovered cell rises in place: a short vertical move and a restrained shadow. No scatter, no glow. */
+.gridLift {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 2px;
+  outline: 1.5px solid var(--ba-ring);
+  outline-offset: 0;
+  box-shadow: var(--ba-lift-shadow);
+  transform: translateY(-3px);
+  animation: ba-lift 120ms var(--ba-ease-ink) both;
+  will-change: transform;
+}
+.gridLift[data-blank] {
+  background-color: var(--ba-check-a);
+  background-image: linear-gradient(45deg, var(--ba-check-b) 25%, transparent 25%, transparent 75%, var(--ba-check-b) 75%),
+    linear-gradient(45deg, var(--ba-check-b) 25%, transparent 25%, transparent 75%, var(--ba-check-b) 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 4px 4px;
+}
+@keyframes ba-lift {
+  from { transform: translateY(0); box-shadow: none; }
+  to { transform: translateY(-3px); box-shadow: var(--ba-lift-shadow); }
+}
+.gridTip {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, calc(-100% - 10px));
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--ba-ink-1);
+  background: var(--ba-surface);
+  border: 1px solid var(--ba-border);
+  box-shadow: 0 8px 24px rgba(61, 56, 51, 0.10); /* tokens.css --shadow-rest */
+}
+.gridTip[data-below] { transform: translate(-50%, calc(var(--ba-tip-cell, 0px) + 8px)); }
+@media (prefers-reduced-motion: reduce) {
+  .gridLift { animation: none; transform: none; box-shadow: none; outline-width: 2px; }
+}
+.legend { margin: 0; display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ba-ink-2); }
+.checkerSwatch {
+  width: 16px; height: 16px; flex: none; border-radius: 3px; border: 1px solid var(--ba-border);
+  background-color: var(--ba-check-a);
+  background-image: linear-gradient(45deg, var(--ba-check-b) 25%, transparent 25%, transparent 75%, var(--ba-check-b) 75%),
+    linear-gradient(45deg, var(--ba-check-b) 25%, transparent 25%, transparent 75%, var(--ba-check-b) 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 4px 4px;
+}
+.recolor { border-top: 1px solid var(--ba-border); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.scope { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.scope label { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; cursor: pointer; }
+.paletteGrid {
+  list-style: none; margin: 0; padding: 4px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 8px;
+  max-height: 260px; overflow: auto;
+  border: 1px solid var(--ba-border); border-radius: 10px; background: var(--ba-surface-2);
+}
+.paletteButton {
+  width: 100%; min-height: 48px; padding: 4px 2px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--ba-ink-1);
+  font: inherit; font-size: 11px; cursor: pointer;
+}
+.paletteButton:hover:not(:disabled) { border-color: var(--ba-border); background: var(--ba-surface); }
+.paletteButton:focus-visible { outline: 2px solid var(--ba-accent); outline-offset: 1px; }
+.paletteButton:disabled { cursor: not-allowed; opacity: 0.45; }
+.paletteButton[aria-pressed="true"] { opacity: 1; border-color: var(--ba-ring); }
+.paletteChip { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--ba-border); }
+.paletteCode { font-variant-numeric: tabular-nums; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recolorFooter { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.editNotice {
+  margin: 0; padding: 6px 10px; border-radius: 8px; font-size: 12px;
+  background: color-mix(in srgb, var(--ba-accent-quiet) 30%, var(--ba-surface));
+  border: 1px solid var(--ba-border);
+}
+.captionNote { font-weight: 400; font-size: 12px; color: var(--ba-ink-2); }
 
 @container (max-width: 760px) {
   .workspace, .resultLayout { grid-template-columns: minmax(0, 1fr); }

@@ -50,6 +50,35 @@ function job(overrides: Partial<JobRecord> = {}): JobRecord {
   }
 }
 
+const PALETTE = {
+  jobId: 'job-20261128-100000-0123abcd',
+  brandId: 'mard',
+  brand: 'MARD',
+  entries: [
+    { code: 'A1', name: '白', hex: '#FFFFFF', origin: 'official', sameAs: null },
+    { code: 'H7', name: '黑', hex: '#000000', origin: 'official', sameAs: null },
+    { code: 'B3', name: '天藍', hex: '#7FB8E6', origin: 'official', sameAs: null },
+    { code: 'B9', name: '天藍二', hex: '#7FB8E6', origin: 'official', sameAs: 'B3' },
+  ],
+}
+
+function utf8Base64(text: string): string {
+  return btoa(String.fromCharCode(...new TextEncoder().encode(text)))
+}
+
+/** coordinates.csv in convert.py's column order; '' marks an empty (transparent) cell. */
+function coordinatesCsv(width: number, height: number, codeAt: (index: number) => string): string {
+  const hex: Record<string, string> = { A1: '#FFFFFF', H7: '#000000', B3: '#7FB8E6' }
+  const lines = ['row,column,source_hex,source_rgb,brand,code,reference_hex,delta_e00']
+  for (let index = 0; index < width * height; index++) {
+    const code = codeAt(index)
+    const row = Math.floor(index / width) + 1
+    const column = (index % width) + 1
+    lines.push(code === '' ? `${column},${column},,,"MARD, 拼豆",,,` : `${row},${column},#FEFEFE,"254,254,254","MARD, 拼豆",${code},${hex[code] ?? '#123456'},1.5`)
+  }
+  return lines.join('\r\n') + '\r\n'
+}
+
 function fakeApi(overrides: Partial<Record<keyof BeadAtlasApi, unknown>> = {}): BeadAtlasApi {
   const png = 'iVBORw0KGgo='
   const base = {
@@ -60,7 +89,11 @@ function fakeApi(overrides: Partial<Record<keyof BeadAtlasApi, unknown>> = {}): 
     createJob: vi.fn(async () => ok(job({ status: 'running', files: [], summary: null, materials: [], finishedAt: null }))),
     getJob: vi.fn(async () => ok(job())),
     cancelJob: vi.fn(async () => ok(job({ status: 'cancelled' }))),
-    getResultFile: vi.fn(async (payload: { name: string }) => ok({ name: payload.name, mediaType: 'image/png', bytes: 8, dataBase64: png })),
+    getResultFile: vi.fn(async (payload: { name: string }) => (payload.name === 'coordinates.csv'
+      ? ok({ name: payload.name, mediaType: 'text/csv', bytes: 0, dataBase64: utf8Base64(coordinatesCsv(48, 36, () => 'A1')) })
+      : ok({ name: payload.name, mediaType: 'image/png', bytes: 8, dataBase64: png }))),
+    getPalette: vi.fn(async () => ok(PALETTE)),
+    createEditedJob: vi.fn(async () => ok(job({ id: 'job-20261128-100100-0123abce', status: 'running', files: [], summary: null, materials: [], finishedAt: null, editedFrom: 'job-20261128-100000-0123abcd' }))),
     deleteJob: vi.fn(async () => ok({ deleted: 'job-20261128-100000-0123abcd' })),
     updateConfig: vi.fn(async () => ok({ pythonPath: null, defaults: DEFAULT_SETTINGS })),
   }
@@ -68,6 +101,8 @@ function fakeApi(overrides: Partial<Record<keyof BeadAtlasApi, unknown>> = {}): 
 }
 
 beforeAll(() => {
+  // jsdom has no canvas; the grid's drawing is checked in the real DSH run.
+  HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement['getContext']
   URL.createObjectURL = vi.fn(() => 'blob:test')
   URL.revokeObjectURL = vi.fn()
 })
@@ -318,6 +353,96 @@ describe('BeadAtlasPage', () => {
     const failed = job({ status: 'failed', files: [], summary: null, materials: [], failure: { code: 'bead-atlas/timeout', detail: 'stopped after 120 s' } })
     render(<BeadAtlasPage t={t} api={fakeApi({ listJobs: vi.fn(async () => ok([failed])) })} />)
     expect(await screen.findByText(t('failure.bead-atlas/timeout', { detail: 'stopped after 120 s' }))).toBeTruthy()
+  })
+})
+
+describe('interactive grid', () => {
+  // 4 × 3 grid: two empty cells, A1 ×6, H7 ×4.
+  const codes = ['', 'A1', 'A1', 'H7', 'A1', 'A1', 'H7', 'H7', 'A1', 'A1', 'H7', '']
+  const small = job({
+    summary: { ...job().summary!, gridWidth: 4, gridHeight: 3, placedBeads: 10, blankCells: 2, usedColors: 2 },
+    settings: { ...DEFAULT_SETTINGS, sparePercent: 10, packSize: 1000 },
+    materials: [
+      { code: 'A1', name: '白', referenceHex: '#FFFFFF', origin: 'official', beadCount: 6, purchaseBeads: 7, packsToBuy: 1 },
+      { code: 'H7', name: '黑', referenceHex: '#000000', origin: 'official', beadCount: 4, purchaseBeads: 5, packsToBuy: 1 },
+    ],
+  })
+  const gridApi = (extra: Partial<Record<keyof BeadAtlasApi, unknown>> = {}) => fakeApi({
+    listJobs: vi.fn(async () => ok([small])),
+    getResultFile: vi.fn(async (payload: { name: string }) => ok({ name: payload.name, mediaType: 'text/csv', bytes: 0, dataBase64: utf8Base64(coordinatesCsv(4, 3, index => codes[index] ?? '')) })),
+    ...extra,
+  })
+
+  it('shows code, colour and same-code count on hover, and marks empty cells as no bead', async () => {
+    const api = gridApi()
+    render(<BeadAtlasPage t={t} api={api} />)
+    const grid = await screen.findByTestId('bead-grid')
+    expect(screen.getByText(t('grid.blankLegend', { count: '2' }))).toBeTruthy()
+    expect(api.getPalette).toHaveBeenCalledWith({ jobId: small.id }, expect.anything())
+    fireEvent.keyDown(grid, { key: 'ArrowRight' })
+    expect(await screen.findByText(t('grid.info', { row: 1, column: 2, code: 'A1', name: '白', hex: '#FFFFFF', count: '6' }))).toBeTruthy()
+    fireEvent.keyDown(grid, { key: 'ArrowLeft' })
+    expect(await screen.findByText(t('grid.infoBlank', { row: 1, column: 1, count: '2' }))).toBeTruthy()
+    // The empty background is not a material.
+    expect(within(screen.getByRole('table')).queryByText('#FAFAFA')).toBeNull()
+    expect(screen.getAllByRole('row')).toHaveLength(3)
+  })
+
+  it('recolors one cell or every cell of a code from the engine palette and updates materials at once', async () => {
+    const api = gridApi()
+    render(<BeadAtlasPage t={t} api={api} />)
+    const grid = await screen.findByTestId('bead-grid')
+    fireEvent.keyDown(grid, { key: 'ArrowRight' })
+    fireEvent.keyDown(grid, { key: 'Enter' })
+    expect(await screen.findByText(t('recolor.selected', { code: 'A1', name: '白', count: '6' }))).toBeTruthy()
+    // A code whose colour equals an earlier code cannot be chosen (the engine would map it to the earlier one).
+    expect((screen.getByLabelText(t('recolor.choose', { code: 'B9', name: '天藍二', hex: '#7FB8E6' })) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByLabelText(zh['recolor.scopeCell']))
+    fireEvent.click(screen.getByLabelText(t('recolor.choose', { code: 'B3', name: '天藍', hex: '#7FB8E6' })))
+    const table = screen.getByRole('table')
+    await waitFor(() => { expect(within(table).getByText('B3')).toBeTruthy() })
+    expect(within(table).getByText(zh['materials.edited'], { exact: false })).toBeTruthy()
+    /** [count, purchase, packs] cells of one material row. */
+    const numbers = (code: string) => [...(within(table).getByText(code).closest('tr') as HTMLElement).querySelectorAll('td')].slice(3).map(cell => cell.textContent)
+    expect(numbers('A1')).toEqual(['5', '6', '1'])
+    expect(numbers('B3')).toEqual(['1', '2', '1'])
+    // Now replace every remaining A1 (5) with H7.
+    fireEvent.keyDown(grid, { key: 'ArrowRight' })
+    fireEvent.keyDown(grid, { key: 'Enter' })
+    fireEvent.click(await screen.findByLabelText(t('recolor.scopeCode', { code: 'A1', count: '5' })))
+    fireEvent.click(screen.getByLabelText(t('recolor.choose', { code: 'H7', name: '黑', hex: '#000000' })))
+    await waitFor(() => { expect(within(table).queryByText('A1')).toBeNull() })
+    expect(numbers('H7')).toEqual(['9', '10', '1']) // 9 + ceil(0.9) spare
+    fireEvent.click(screen.getByText(zh['recolor.undo']))
+    await waitFor(() => { expect(within(table).getByText('A1')).toBeTruthy() })
+    fireEvent.click(screen.getByText(zh['recolor.regenerate']))
+    await waitFor(() => { expect(api.createEditedJob).toHaveBeenCalledTimes(1) })
+    const request = (api.createEditedJob as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as { jobId: string; width: number; height: number; cells: string[] }
+    expect(request).toMatchObject({ jobId: small.id, width: 4, height: 3 })
+    expect(request.cells).toEqual(['', 'B3', 'A1', 'H7', 'A1', 'A1', 'H7', 'H7', 'A1', 'A1', 'H7', ''])
+  })
+
+  it('does not offer recoloring for an empty cell', async () => {
+    render(<BeadAtlasPage t={t} api={gridApi()} />)
+    const grid = await screen.findByTestId('bead-grid')
+    fireEvent.keyDown(grid, { key: 'Enter' })
+    expect(await screen.findByText(zh['recolor.blank'])).toBeTruthy()
+  })
+})
+
+describe('bead grid helpers', () => {
+  it('match convert.py arithmetic and never count empty cells', async () => {
+    const { liveMaterials, recolor, cellAt } = await import('../src/client/bead-grid.ts')
+    const lookup = new Map([['A1', { name: '白', hex: '#FFFFFF', origin: 'official' }], ['H7', { name: '黑', hex: '#000000', origin: 'official' }]])
+    const grid = ['', 'A1', 'H7', 'H7', 'A1', 'H7']
+    const { materials, totals } = liveMaterials(grid, lookup, { sparePercent: 15, packSize: 2 })
+    expect(materials.map(row => [row.code, row.beadCount, row.purchaseBeads, row.packsToBuy])).toEqual([['H7', 3, 4, 2], ['A1', 2, 3, 2]])
+    expect(totals).toEqual({ placedBeads: 5, blankCells: 1, usedColors: 2, purchaseBeads: 7, estimatedPacks: 4 })
+    expect(recolor(grid, 1, 'H7', 'cell')).toEqual({ codes: ['', 'H7', 'H7', 'H7', 'A1', 'H7'], changed: 1 })
+    expect(recolor(grid, 1, 'B3', 'code').changed).toBe(2)
+    expect(recolor(grid, 0, 'B3', 'code').changed).toBe(0)
+    expect(cellAt(25, 13, 12, 3, 2)).toBe(5)
+    expect(cellAt(37, 0, 12, 3, 2)).toBeNull()
   })
 })
 

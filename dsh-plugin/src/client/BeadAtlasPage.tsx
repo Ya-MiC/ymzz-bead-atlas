@@ -18,6 +18,7 @@ import { ConversionSettings, invalidField } from './ConversionSettings.tsx'
 import { fileToBase64, imageSize, payloadToBlob } from './files.ts'
 import { errorText, formatNumber } from './format.ts'
 import { ImagePreview } from './ImagePreview.tsx'
+import type { GridEdits } from './BeadGrid.tsx'
 import { ImageUploader, precheckFile, type PickedImage } from './ImageUploader.tsx'
 import { JobHistory, statusKey } from './JobHistory.tsx'
 import type { BeadAtlasLocaleKey, Translate } from './locales.ts'
@@ -117,9 +118,10 @@ function EnvironmentPanel({ t, status, error, onRecheck, onSavePath, pythonPath 
   )
 }
 
-function Summary({ t, job }: { t: Translate; job: JobRecord }) {
-  const summary = job.summary
-  if (summary === null) return null
+function Summary({ t, job, edits }: { t: Translate; job: JobRecord; edits: GridEdits | null }) {
+  const base = job.summary
+  if (base === null) return null
+  const summary = edits === null ? base : { ...base, ...edits.totals }
   const items: [BeadAtlasLocaleKey, string][] = [
     ['result.brand', summary.brand],
     ['result.grid', t('result.gridValue', { width: summary.gridWidth, height: summary.gridHeight })],
@@ -157,6 +159,7 @@ export function BeadAtlasPage({ t, api, pollRetryDelaysMs = POLL_RETRY_DELAYS_MS
   const [phase, setPhase] = useState<Phase>('idle')
   const [message, setMessage] = useState<string | null>(null)
   const [pollNote, setPollNote] = useState<string | null>(null)
+  const [edits, setEdits] = useState<GridEdits | null>(null)
   /** True while a newly picked image is being decoded; Generate waits for it. */
   const [decoding, setDecoding] = useState(false)
   const life = useRef<AbortController | null>(null)
@@ -330,6 +333,17 @@ export function BeadAtlasPage({ t, api, pollRetryDelaysMs = POLL_RETRY_DELAYS_MS
     }, job.settings)
   }
 
+  const regenerateEdited = async (codes: readonly string[]) => {
+    if (current?.summary == null) return
+    setMessage(null)
+    const result = await api.createEditedJob({ jobId: current.id, width: current.summary.gridWidth, height: current.summary.gridHeight, cells: codes }, life.current?.signal)
+    if (!result.ok) { fail(result.error); return }
+    setEdits(null)
+    setCurrent(result.value)
+    void refreshJobs()
+    await follow(result.value.id)
+  }
+
   const remove = async (job: JobRecord) => {
     const result = await api.deleteJob({ jobId: job.id, confirmed: true })
     if (!result.ok) { fail(result.error); return }
@@ -347,6 +361,9 @@ export function BeadAtlasPage({ t, api, pollRetryDelaysMs = POLL_RETRY_DELAYS_MS
 
   const ready = env?.ready === true
   const working = phase !== 'idle'
+  const currentId = current?.id ?? null
+  // Live edits belong to one job; switching jobs drops them.
+  useEffect(() => { setEdits(null) }, [currentId])
   const jobRunning = current?.status === 'running'
   const failureText = current?.failure == null
     ? null
@@ -416,13 +433,20 @@ export function BeadAtlasPage({ t, api, pollRetryDelaysMs = POLL_RETRY_DELAYS_MS
         )}
         {current !== null && current.status === 'succeeded' && (
           <div className={css.resultLayout}>
-            <ImagePreview t={t} api={api} job={current} />
+            <ImagePreview t={t} api={api} job={current} busy={working || jobRunning} onEdits={setEdits} onRegenerate={regenerateEdited} />
             <div className={css.resultSide}>
-              <Summary t={t} job={current} />
+              {current.editedFrom !== undefined && (
+                <p className={css.note}>
+                  {t('result.editedFrom', { id: current.editedFrom })}
+                  {current.editCheck !== undefined && current.editCheck.mismatched > 0 && <> {t('result.editMismatch', { count: current.editCheck.mismatched })}</>}
+                </p>
+              )}
+              {edits !== null && <p className={css.editNotice} role="status">{t('result.editsPending', { count: formatNumber(edits.changed) })}</p>}
+              <Summary t={t} job={current} edits={edits} />
               <p className={css.note}>{t('result.hexNote')}</p>
               <ResultDownloads t={t} api={api} job={current} />
             </div>
-            <MaterialsTable t={t} materials={current.materials} />
+            <MaterialsTable t={t} materials={edits?.materials ?? current.materials} edited={edits !== null} />
           </div>
         )}
       </section>
