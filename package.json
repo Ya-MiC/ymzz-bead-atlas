@@ -1,0 +1,87 @@
+{
+  "name": "@ymzz/bead-atlas",
+  "version": "0.1.0",
+  "description": "YMZZ Bead Atlas DSH GUI plugin: turn an image into a bead pattern inside DeepSeek Harness, using the bundled Python engine.",
+  "license": "MIT",
+  "author": "晏銘湛箴 / YanMing Cao",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ya-MiC/ymzz-bead-atlas.git"
+  },
+  "homepage": "https://github.com/Ya-MiC/ymzz-bead-atlas#readme",
+  "bugs": "https://github.com/Ya-MiC/ymzz-bead-atlas/issues",
+  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "perler-beads", "bead-pattern"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "icon": "./dsh-plugin/icon.svg",
+  "type": "module",
+  "main": "./dsh-plugin/lib/index.js",
+  "exports": {
+    ".": "./dsh-plugin/lib/index.js",
+    "./client": "./dsh-plugin/lib/client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./dsh-plugin/cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "engines": {
+    "dsh": ">=0.2.2-rc.5 <0.3.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./dsh-plugin/cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  },
+  "files": [
+    "dsh-plugin/icon.svg",
+    "locale/*.json",
+    "docs/DSH-PLUGIN.md",
+    "dsh-plugin/cordis.patch.yml",
+    "dsh-plugin/lib/index.js",
+    "dsh-plugin/lib/client.js",
+    "scripts/convert.py",
+    "scripts/brands.json",
+    "scripts/data/*.csv",
+    "scripts/presets/*.json",
+    "requirements.txt",
+    "LICENSE",
+    "NOTICE.md",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node dsh-plugin/scripts/build.mjs",
+    "typecheck": "tsc -p dsh-plugin/tsconfig.json --noEmit && tsc -p dsh-plugin/tsconfig.client.json --noEmit && tsc -p dsh-plugin/tsconfig.tests.json --noEmit",
+    "test": "vitest run --config dsh-plugin/vitest.config.ts",
+    "test:python": "python -m unittest discover -s tests -v"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-home-paths": "0.2.2-rc.5"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.1.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^22.20.1",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "~18.3.0",
+    "jsdom": "29.1.1",
+    "lightningcss": "^1.33.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "rolldown": "1.3.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  },
+  "packageManager": "pnpm@11.28.5"
+}
