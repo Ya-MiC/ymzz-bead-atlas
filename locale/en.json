@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Bead Atlas",
+    "description": "Turn an image into a bead pattern with a materials list, cell coordinates, and a buying estimate. Runs locally with Python; images are not uploaded.",
+    "detail": "docs/DSH-PLUGIN.md"
+  }
+}

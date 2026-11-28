@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "拼豆圖譜",
+    "description": "把圖片轉成拼豆圖紙，附材料表、逐格座標與採購估算。在本機用 Python 處理，不上傳圖片。",
+    "detail": "docs/DSH-PLUGIN.md"
+  }
+}
