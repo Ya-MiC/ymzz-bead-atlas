@@ -37,7 +37,11 @@
 5. 結束後 Host 檢查七個輸出是否齊全，讀 `usage.json` 做摘要與材料表，寫入 `job.json`。
 6. 瀏覽器需要預覽或下載時，依任務 id 與固定檔名（白名單）取檔；Host 以 `realpath` 確認檔案仍在該任務資料夾內才回傳。
 
-同一時間只跑一個轉換。DSH 在轉換中途關閉時，下次啟動會把該任務標成「中斷」。
+同一時間只跑一個轉換：Host 在第一個 `await` 之前就佔住唯一的轉換名額，兩個同時到達的請求只有一個能啟動 Python，另一個收到 `bead-atlas/busy`；檢查失敗會釋放名額。DSH 在轉換中途關閉時，下次啟動會把該任務標成「中斷」。
+
+環境檢查除了 Python ≥ 3.10，也檢查 Pillow ≥ 12.1（`convert.py` 呼叫的 `Image.get_flattened_data()` 在 Pillow 12.1 才加入），低於 12.1 直接標為 `pillow-too-old`，面板顯示升級命令與「重新檢測」，不會等到生成才失敗。
+
+查詢任務狀態偶發失敗時，介面保留「生成中」與「取消」，最多重試 5 次（間隔 1、2、4、8、15 秒）；超過上限才停止追蹤，並顯示「繼續追蹤」。這個次數與間隔是本插件自訂（衍生值），文潤規範與 DSH 都沒有規定重試次數。
 
 ## 4. 通道端點
 
@@ -52,6 +56,8 @@
 | `getResultFile` | 七個輸出之一或原圖，base64 |
 | `deleteJob` | 刪除一個任務資料夾，必須帶 `confirmed: true` |
 | `getConfig`、`updateConfig` | Python 路徑（只接受絕對路徑且檔名為 python / python3 / py）與表單預設值 |
+| `getPalette` | 某個已完成任務所用的色卡（品牌加上該任務的自訂色群），由 Python 用引擎自己的 `load_brands`、`load_preset`、`read_palette_csv`、`apply_overrides` 讀出；TS 端不存任何色卡資料 |
+| `createEditedJob` | 把改色後的網格交回原引擎重新產生全部七個檔案，結果是新任務（見第 6 節） |
 
 所有端點只接受 owner Peer（本機使用者）；其他 Peer 一律回 `bead-atlas/forbidden`。不存在任意路徑或任意命令的端點。
 
@@ -64,7 +70,18 @@
 
 完整比對見交付報告中的上游規範核對表。
 
-## 6. 開發與測試
+## 6. 互動圖紙：浮起、同色高亮、空背景、改色
+
+實作位置：`dsh-plugin/src/client/BeadGrid.tsx`（元件）、`dsh-plugin/src/client/bead-grid.ts`（命中、計數、替換、材料計算的純函式）、`dsh-plugin/src/remote/csv.ts`（讀 `coordinates.csv`）、`dsh-plugin/styles/bead-atlas.module.css`（`.grid*`、`.palette*`、`.recolor*`）。結果區預設分頁「互動圖紙」。
+
+1. **分層繪製**：底層一張 Canvas 2D 一次畫完所有格子（實測 200 × 200 = 40,000 格時，滑鼠移動到讀數更新的中位數約 11 ms，含自動化工具往返）；上層一張 Canvas 只在「目前色號」改變時重畫，把其他色號蓋上一層紙色薄紗；懸停的那一格用一個 DOM 元素表示。
+2. **原位浮起**：懸停或按住拖過的格子在原位向上移 3 px，加細描邊與克制陰影（`--shadow-rest` 的縮小版），120 ms、`--ease-ink` 曲線。沒有粒子、沒有四散、沒有發光。`prefers-reduced-motion: reduce` 時不位移、不加陰影，只留 2 px 描邊。
+3. **同色號聯動**：懸停（或選取）某格時，全圖同色號的格子保持原色，其他格子被薄紗壓淡；提示框與下方讀數顯示色號、名稱、HEX 與該色號總顆數。鍵盤：方向鍵移動、Enter 選取、Esc 取消。
+4. **空背景**：原圖透明（alpha < 128）的格子在 `coordinates.csv` 沒有色號，畫成棋盤格並標示「空背景（不放豆）」；不計入用豆數與材料表。
+5. **改色**：點一顆豆 → 從目前品牌色卡（`getPalette`，來自 Python 引擎，含任務使用的自訂色群）挑替代色號 → 選「只改這一格」或「全部同色號」。材料表與摘要即時重算（備損 = ceil(顆數 × 備損% / 100)、包數 = ceil(採購顆數 / 每包顆數)，與 `convert.py` 相同算式），並標示「含改色（尚未重新生成）」。可「復原上一步」「還原全部」。色值與更早的色號完全相同的色號不能選（引擎會把同色值歸給較早的色號），會提示改選那一個。
+6. **匯出改色結果（如何重新產生）**：按「以改色重新生成圖紙」時，Host 把網格畫成一張與網格同尺寸的 RGBA PNG（一格一像素，用該色號的精確 RGB；空背景完全透明），再用**未修改的** `convert.py` 跑一次：同品牌、同自訂色群、同底板與包裝設定，`--width`/`--height` 等於網格尺寸，`--max-colors 0`。Pillow 縮放到相同尺寸時不改像素、精確 RGB 的 CIEDE2000 最近色就是自己（ΔE00 = 0），所以產出的七個檔案格式與一般任務完全相同。結果另存為新任務（`editedFrom` 指向原任務），原任務檔案不變。Host 會逐格比對新 `coordinates.csv` 與要求的色號，寫入 `editCheck`；不一致時面板會提示。新任務的「原圖」是這張網格 PNG，平均/最大 ΔE00 會是 0。
+
+## 7. 開發與測試
 
 ```bash
 pnpm install
@@ -78,7 +95,7 @@ Host 測試用 `dsh-plugin/tests/helpers/node-subprocess.ts`（以 `child_proces
 
 SkillPay ZIP（`scripts/package.py`）用明確清單打包，不含 `dsh-plugin/`、`package.json`、`node_modules/`、`locale/`；`tests/test_skillpay_package.py` 會檢查這一點。
 
-## 7. 已知限制
+## 8. 已知限制
 
 1. 下載由瀏覽器處理，存到瀏覽器的下載位置；尚未接 DSH 原生的「選擇資料夾」。
 2. 圖形介面不能新增或修改自訂色群預設、覆寫色值或新增色號；這些仍用命令列（見 README）。介面可以選用已存在的預設。
@@ -86,3 +103,4 @@ SkillPay ZIP（`scripts/package.py`）用明確清單打包，不含 `dsh-plugin
 4. 任務 id 中的時間是 UTC。
 5. GIF 只轉第一幀。
 6. 插件不會安裝 Python 或 Pillow，也不會改動系統套件。
+7. 改色不能把豆子改成空背景，也不能在空背景上加豆；這兩種仍需改原圖再生成。
