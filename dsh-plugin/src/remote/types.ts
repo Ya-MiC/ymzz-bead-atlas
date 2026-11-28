@@ -130,6 +130,7 @@ export type EnvironmentProblem =
   | 'python-not-found'
   | 'python-too-old'
   | 'pillow-missing'
+  | 'pillow-too-old'
   | 'engine-incomplete'
 
 export interface EnvironmentStatus {
@@ -145,7 +146,10 @@ export interface EnvironmentStatus {
   readonly pillow: {
     readonly found: boolean
     readonly version: string | null
+    /** Version requirements.txt pins. */
     readonly required: string
+    /** Oldest Pillow convert.py works with (it calls Image.get_flattened_data, new in 12.1). */
+    readonly minimum: string
   }
   readonly engine: {
     readonly complete: boolean
@@ -211,6 +215,10 @@ export interface JobRecord {
   readonly summary: JobSummary | null
   readonly materials: readonly MaterialRow[]
   readonly failure: { readonly code: JobFailureCode; readonly detail: string } | null
+  /** Set when this job was regenerated from another job's recolored grid. */
+  readonly editedFrom?: string
+  /** For a recolored job: cells whose code the engine did not reproduce (see docs/DSH-PLUGIN.md). */
+  readonly editCheck?: { readonly cells: number; readonly mismatched: number }
 }
 
 export interface PluginConfig {
@@ -224,6 +232,32 @@ export interface CreateJobRequest {
   readonly fileName: string
   readonly dataBase64: string
   readonly settings: ConversionSettings
+}
+
+/** One palette entry, read by the Python engine's own functions (never a TS copy). */
+export interface PaletteEntry {
+  readonly code: string
+  readonly name: string
+  /** `#RRGGBB`. */
+  readonly hex: string
+  readonly origin: string
+  /** Earlier code with the same RGB; the engine would map this colour to that code. */
+  readonly sameAs: string | null
+}
+
+export interface JobPalette {
+  readonly jobId: string
+  readonly brandId: string
+  readonly brand: string
+  readonly entries: readonly PaletteEntry[]
+}
+
+/** Recolored grid: one code per cell in row-major order, '' for an empty (no bead) cell. */
+export interface CreateEditedJobRequest {
+  readonly jobId: string
+  readonly width: number
+  readonly height: number
+  readonly cells: readonly string[]
 }
 
 export interface ResultFilePayload {
@@ -269,12 +303,14 @@ export interface BeadAtlasEndpoints {
   deleteJob: { payload: { readonly jobId: string; readonly confirmed: boolean }; result: { readonly deleted: string } }
   getConfig: { payload: Record<string, never>; result: PluginConfig }
   updateConfig: { payload: Partial<PluginConfig>; result: PluginConfig }
+  getPalette: { payload: { readonly jobId: string }; result: JobPalette }
+  createEditedJob: { payload: CreateEditedJobRequest; result: JobRecord }
 }
 
 export type EndpointName = keyof BeadAtlasEndpoints
 export const ENDPOINTS: readonly EndpointName[] = [
   'getEnvironmentStatus', 'listBrands', 'createJob', 'getJob', 'cancelJob', 'listJobs',
-  'getResultFile', 'deleteJob', 'getConfig', 'updateConfig',
+  'getResultFile', 'deleteJob', 'getConfig', 'updateConfig', 'getPalette', 'createEditedJob',
 ]
 
 export const MEDIA_TYPES: Record<JobFileName, string> = {

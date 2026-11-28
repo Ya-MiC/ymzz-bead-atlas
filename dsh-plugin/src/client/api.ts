@@ -52,5 +52,7 @@ export function createApi(connection: ConnectionLike): BeadAtlasApi {
     deleteJob: call('deleteJob'),
     getConfig: call('getConfig'),
     updateConfig: call('updateConfig'),
+    getPalette: call('getPalette'),
+    createEditedJob: call('createEditedJob'),
   } as BeadAtlasApi
 }

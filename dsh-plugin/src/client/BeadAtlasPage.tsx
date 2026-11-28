@@ -28,11 +28,26 @@ import css from '../../styles/bead-atlas.module.css'
 export interface BeadAtlasPageProps {
   readonly t: Translate
   readonly api: BeadAtlasApi
+  /**
+   * Waits between retries after a status request fails; its length is the retry limit.
+   * Derived values: the design archive sets no retry count (see docs/DSH-PLUGIN.md).
+   */
+  readonly pollRetryDelaysMs?: readonly number[]
 }
 
 type Phase = 'idle' | 'submitting' | 'running' | 'cancelling'
 const PYTHON_DOWNLOAD_URL = 'https://www.python.org/downloads/'
 const WAIT_MS = 20_000
+const POLL_RETRY_DELAYS_MS: readonly number[] = [1000, 2000, 4000, 8000, 15000]
+/** Status errors that are answers, not transient failures: retrying cannot change them. */
+const FINAL_POLL_ERRORS = new Set(['bead-atlas/not-found', 'bead-atlas/bad-request', 'bead-atlas/forbidden'])
+
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    signal.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true })
+  })
+}
 
 function EnvironmentPanel({ t, status, error, onRecheck, onSavePath, pythonPath }: {
   t: Translate
@@ -68,6 +83,12 @@ function EnvironmentPanel({ t, status, error, onRecheck, onSavePath, pythonPath 
               <>
                 {t('env.pillow-missing', { required: status.pillow.required })}
                 <pre className={css.command}>{`${status.python.command ?? 'python3'} -m pip install -r requirements.txt`}</pre>
+              </>
+            )}
+            {problem === 'pillow-too-old' && (
+              <>
+                {t('env.pillow-too-old', { version: status.pillow.version ?? '?', minimum: status.pillow.minimum, required: status.pillow.required })}
+                <pre className={css.command}>{`${status.python.command ?? 'python3'} -m pip install --upgrade -r requirements.txt`}</pre>
               </>
             )}
             {problem === 'engine-incomplete' && t('env.engine-incomplete', { files: status.engine.missing.join(', ') })}
@@ -123,7 +144,7 @@ function Summary({ t, job }: { t: Translate; job: JobRecord }) {
   )
 }
 
-export function BeadAtlasPage({ t, api }: BeadAtlasPageProps) {
+export function BeadAtlasPage({ t, api, pollRetryDelaysMs = POLL_RETRY_DELAYS_MS }: BeadAtlasPageProps) {
   const [env, setEnv] = useState<EnvironmentStatus | null>(null)
   const [envError, setEnvError] = useState<string | null>(null)
   const [catalog, setCatalog] = useState<BrandCatalog | null>(null)
@@ -135,7 +156,13 @@ export function BeadAtlasPage({ t, api }: BeadAtlasPageProps) {
   const [current, setCurrent] = useState<JobRecord | null>(null)
   const [phase, setPhase] = useState<Phase>('idle')
   const [message, setMessage] = useState<string | null>(null)
+  const [pollNote, setPollNote] = useState<string | null>(null)
+  /** True while a newly picked image is being decoded; Generate waits for it. */
+  const [decoding, setDecoding] = useState(false)
   const life = useRef<AbortController | null>(null)
+  /** Increments on every pick so a slow decode of an older pick cannot overwrite a newer one. */
+  const pickToken = useRef(0)
+  const following = useRef<string | null>(null)
 
   const fail = useCallback((error: RequestError) => { setMessage(errorText(t, error)) }, [t])
 
@@ -157,21 +184,45 @@ export function BeadAtlasPage({ t, api }: BeadAtlasPageProps) {
     }
   }, [api, t])
 
-  /** Follow one running job until the Host reports a terminal state. */
+  /**
+   * Follow one running job until the Host reports a terminal state. A failed status
+   * request is retried a limited number of times while the running view (and its
+   * cancel control) stays up; only a terminal state, a final error, or the retry
+   * limit ends tracking.
+   */
   const follow = useCallback(async (jobId: string) => {
+    if (following.current === jobId) return
+    following.current = jobId
     setPhase(previous => (previous === 'cancelling' ? previous : 'running'))
-    for (;;) {
-      const signal = life.current?.signal
-      if (signal?.aborted !== false) return
-      const result = await api.getJob({ jobId, waitMs: WAIT_MS }, signal)
-      if (signal.aborted) return
-      if (!result.ok) { fail(result.error); break }
-      setCurrent(result.value)
-      if (result.value.status !== 'running') break
+    let failures = 0
+    try {
+      for (;;) {
+        const signal = life.current?.signal
+        if (signal?.aborted !== false) return
+        const result = await api.getJob({ jobId, waitMs: WAIT_MS }, signal)
+        if (signal.aborted) return
+        if (!result.ok) {
+          failures++
+          if (FINAL_POLL_ERRORS.has(result.error.code) || failures > pollRetryDelaysMs.length) {
+            setPollNote(null)
+            fail(result.error)
+            break
+          }
+          setPollNote(t('status.retrying', { attempt: failures, max: pollRetryDelaysMs.length }))
+          await pause(pollRetryDelaysMs[failures - 1] ?? 1000, signal)
+          continue
+        }
+        failures = 0
+        setPollNote(null)
+        setCurrent(result.value)
+        if (result.value.status !== 'running') break
+      }
+    } finally {
+      if (following.current === jobId) following.current = null
     }
     setPhase('idle')
     await refreshJobs()
-  }, [api, fail, refreshJobs])
+  }, [api, fail, refreshJobs, pollRetryDelaysMs, t])
 
   // Load the environment, form defaults, and history once when the panel opens.
   useEffect(() => {
@@ -194,24 +245,32 @@ export function BeadAtlasPage({ t, api }: BeadAtlasPageProps) {
   }, [api, checkEnvironment, follow, refreshJobs])
 
   // Release the picked image's object URL when it is replaced or the panel closes.
-  useEffect(() => () => { if (image !== null) URL.revokeObjectURL(image.url) }, [image])
+  const imageUrl = image?.url ?? null
+  useEffect(() => () => { if (imageUrl !== null && imageUrl !== '') URL.revokeObjectURL(imageUrl) }, [imageUrl])
 
   const pick = async (file: File | Blob, name: string) => {
+    const token = ++pickToken.current
     setUploadProblem(null)
     if (file instanceof File) {
       const problem = precheckFile(t, file)
       if (problem !== null) { setUploadProblem(problem); return }
     }
-    const size = await imageSize(file)
+    // Make the new file the active one at once and mark it decoding, so Generate can
+    // never send the previous image while this one is still being read.
+    setDecoding(true)
     setImage({
       file,
       name,
       bytes: file.size,
       url: URL.createObjectURL(file),
-      width: size?.width ?? null,
-      height: size?.height ?? null,
+      width: null,
+      height: null,
       isGif: file.type === 'image/gif' || /\.gif$/i.test(name),
     })
+    const size = await imageSize(file)
+    if (token !== pickToken.current) return
+    setImage(previous => (previous !== null && previous.file === file ? { ...previous, width: size?.width ?? null, height: size?.height ?? null } : previous))
+    setDecoding(false)
   }
 
   const generate = async (source: PickedImage, chosen: Settings) => {
@@ -219,9 +278,22 @@ export function BeadAtlasPage({ t, api }: BeadAtlasPageProps) {
     const bad = invalidField(chosen)
     if (bad !== null) { setMessage(t('settings.invalid', { field: bad })); return }
     setPhase('submitting')
-    const dataBase64 = await fileToBase64(source.file)
+    let dataBase64: string
+    try {
+      dataBase64 = await fileToBase64(source.file)
+    } catch {
+      // A FileReader failure must not leave the panel stuck in "submitting".
+      setPhase('idle')
+      setMessage(t('upload.readFailed'))
+      return
+    }
     const result = await api.createJob({ fileName: source.name, dataBase64, settings: chosen }, life.current?.signal)
-    if (!result.ok) { setPhase('idle'); fail(result.error); return }
+    if (!result.ok) {
+      setPhase('idle')
+      fail(result.error)
+      if (result.error.code === 'bead-atlas/busy') void refreshJobs()
+      return
+    }
     setCurrent(result.value)
     void refreshJobs()
     await follow(result.value.id)
@@ -229,9 +301,20 @@ export function BeadAtlasPage({ t, api }: BeadAtlasPageProps) {
 
   const cancel = async () => {
     if (current === null) return
+    setMessage(null)
     setPhase('cancelling')
     const result = await api.cancelJob({ jobId: current.id })
-    if (!result.ok && result.error.code !== 'bead-atlas/not-running') fail(result.error)
+    if (result.ok) {
+      if (following.current === null) { setCurrent(result.value); setPhase('idle'); void refreshJobs() }
+      return
+    }
+    if (result.error.code === 'bead-atlas/not-running') {
+      if (following.current === null) setPhase('idle')
+      return
+    }
+    // The job is still running: give the cancel control back so the user can retry.
+    fail(result.error)
+    setPhase(following.current === null ? 'idle' : 'running')
   }
 
   const regenerate = async (job: JobRecord) => {
@@ -264,6 +347,7 @@ export function BeadAtlasPage({ t, api }: BeadAtlasPageProps) {
 
   const ready = env?.ready === true
   const working = phase !== 'idle'
+  const jobRunning = current?.status === 'running'
   const failureText = current?.failure == null
     ? null
     : t(`failure.${current.failure.code}` as BeadAtlasLocaleKey, { detail: current.failure.detail })
@@ -285,7 +369,7 @@ export function BeadAtlasPage({ t, api }: BeadAtlasPageProps) {
           disabled={working}
           problem={uploadProblem}
           onPick={(file) => { void pick(file, file.name) }}
-          onClear={() => { setImage(null) }}
+          onClear={() => { pickToken.current++; setDecoding(false); setImage(null) }}
         />
         <ConversionSettings t={t} settings={settings} catalog={catalog} disabled={working || !ready} onChange={setSettings} />
       </div>
@@ -293,8 +377,8 @@ export function BeadAtlasPage({ t, api }: BeadAtlasPageProps) {
       <div className={css.actionBar}>
         <Button
           variant="primary"
-          disabled={!ready || image === null || working}
-          onClick={() => { if (image !== null) void generate(image, settings) }}
+          disabled={!ready || image === null || working || decoding || jobRunning}
+          onClick={() => { if (image !== null && !decoding) void generate(image, settings) }}
         >
           {t('action.generate')}
         </Button>
@@ -309,6 +393,15 @@ export function BeadAtlasPage({ t, api }: BeadAtlasPageProps) {
             )}
           </>
         )}
+        {decoding && <span className={css.muted} role="status">{t('upload.decoding')}</span>}
+        {phase === 'idle' && jobRunning && (
+          <>
+            <span className={css.muted} role="status">{t('status.busyHint')}</span>
+            <Button variant="outline" size="sm" onClick={() => { if (current !== null) void follow(current.id) }}>{t('action.resume')}</Button>
+            <Button variant="outline" size="sm" onClick={() => { void cancel() }}>{t('action.cancel')}</Button>
+          </>
+        )}
+        {pollNote !== null && <span className={css.muted} role="status">{pollNote}</span>}
         {message !== null && <p className={css.errorText} role="alert">{message}</p>}
       </div>
 
@@ -339,7 +432,10 @@ export function BeadAtlasPage({ t, api }: BeadAtlasPageProps) {
         jobs={jobs}
         selectedId={current?.id ?? null}
         busy={working}
-        onView={(job) => { setCurrent(job) }}
+        onView={(job) => {
+          setCurrent(job)
+          if (job.status === 'running' && phase === 'idle') void follow(job.id)
+        }}
         onRegenerate={(job) => { void regenerate(job) }}
         onDelete={remove}
         onRefresh={() => { void refreshJobs() }}

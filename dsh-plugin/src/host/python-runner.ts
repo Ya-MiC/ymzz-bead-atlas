@@ -42,6 +42,34 @@ export function requiredPillow(engineRoot: string): string {
   }
 }
 
+/**
+ * Oldest Pillow scripts/convert.py works with: it calls `Image.get_flattened_data()`,
+ * which Pillow added in 12.1 (https://pillow.readthedocs.io/en/stable/releasenotes/12.1.0.html).
+ */
+export const MIN_PILLOW = '12.1'
+
+/**
+ * Compare a Pillow version string with a minimum, numerically by release segment.
+ * Unparseable versions count as too old so the GUI shows guidance instead of failing later.
+ * @param version - e.g. '13.0.0', '12.1.0.dev0'.
+ * @param minimum - e.g. '12.1'.
+ */
+export function pillowAtLeast(version: string, minimum: string = MIN_PILLOW): boolean {
+  const parse = (text: string): number[] | null => {
+    const match = /^(\d+(?:\.\d+)*)/.exec(text.trim())
+    return match?.[1] === undefined ? null : match[1].split('.').map(part => Number.parseInt(part, 10))
+  }
+  const have = parse(version)
+  const need = parse(minimum)
+  if (have === null || need === null) return false
+  for (let index = 0; index < Math.max(have.length, need.length); index++) {
+    const a = have[index] ?? 0
+    const b = need[index] ?? 0
+    if (a !== b) return a > b
+  }
+  return true
+}
+
 const CHECK_CODE = [
   'import json, sys',
   'info = {"version": list(sys.version_info[:3])}',
@@ -52,6 +80,36 @@ const CHECK_CODE = [
   '    info["pillow"] = None',
   'print(json.dumps(info))',
 ].join('\n')
+
+/**
+ * Read one palette with the engine's own functions (load_brands, load_preset,
+ * read_palette_csv, apply_overrides), so the GUI never carries a palette copy.
+ * The preset handling repeats the loading steps of convert.py main() (lines that
+ * read a preset's brand, overrides and extra colours); no matching logic is involved.
+ * argv: [scripts dir, brand id, preset name or ''].
+ */
+const PALETTE_CODE = [
+  'import json, sys',
+  'sys.path.insert(0, sys.argv[1])',
+  'import convert',
+  'payload, brands = convert.load_brands()',
+  'brand_id, preset = sys.argv[2], sys.argv[3]',
+  'overrides, extra = {}, {}',
+  'if preset:',
+  '    data = convert.load_preset(preset)',
+  '    brand_id = data.get("brand", brand_id)',
+  '    for code, value in (data.get("overrides") or {}).items():',
+  '        overrides[code] = {"rgb": convert.hex_to_rgb(value), "name": code}',
+  '    for item in data.get("extra_colors") or []:',
+  '        extra[item["code"]] = {"rgb": convert.hex_to_rgb(item["hex"]), "name": item.get("name", item["code"])}',
+  'brand = brands[brand_id]',
+  'entries = convert.apply_overrides(convert.read_palette_csv(convert.DATA_DIR / brand["file"]), overrides, extra)',
+  'print(json.dumps({"brand_id": brand_id, "brand": brand["name"], "entries": [',
+  '    {"code": e["code"], "name": e["name"], "hex": convert.rgb_to_hex(e["rgb"]), "origin": e["origin"]} for e in entries',
+  ']}, ensure_ascii=False))',
+].join('\n')
+
+const PALETTE_OUTPUT_BYTES = 2 * 1024 * 1024
 
 const CHILD_ENV: NodeJS.ProcessEnv = {
   PYTHONIOENCODING: 'utf-8',
@@ -172,6 +230,7 @@ export class PythonRunner {
     if (reported === null) problems.push('python-not-found')
     else if (found === null) problems.push('python-too-old')
     if (found !== null && found.pillow === null) problems.push('pillow-missing')
+    else if (found !== null && found.pillow !== null && !pillowAtLeast(found.pillow)) problems.push('pillow-too-old')
     const { missing } = this.engineFiles()
     if (missing.length > 0) problems.push('engine-incomplete')
     const status: EnvironmentStatus = {
@@ -183,7 +242,7 @@ export class PythonRunner {
         version: reported === null ? null : reported.version.join('.'),
         configured: this.pythonPath() !== null,
       },
-      pillow: { found: found?.pillow != null, version: found?.pillow ?? null, required: requiredPillow(this.engineRoot) },
+      pillow: { found: found?.pillow != null, version: found?.pillow ?? null, required: requiredPillow(this.engineRoot), minimum: MIN_PILLOW },
       engine: { complete: missing.length === 0, missing },
       checkedAt: new Date().toISOString(),
     }
@@ -215,6 +274,29 @@ export class PythonRunner {
   }
 
   /**
+   * Read a brand palette (with a preset's overrides applied) through the engine.
+   * @param brandId - brand id the job used.
+   * @param preset - preset name the job used, or ''.
+   * @returns parsed entries, or null when Python is not ready or the engine refuses.
+   */
+  async palette(brandId: string, preset: string, signal: AbortSignal): Promise<{ brandId: string; brand: string; entries: { code: string; name: string; hex: string; origin: string }[] } | null> {
+    const command = await this.ready(signal)
+    if (command === null) return null
+    const run = await this.execute([command.executable, ...command.prefix, '-c', PALETTE_CODE, join(this.engineRoot, 'scripts'), brandId, preset], this.engineRoot, 30_000, signal, PALETTE_OUTPUT_BYTES)
+    if (run.kind !== 'ok') return null
+    try {
+      const parsed = JSON.parse(run.stdout.trim().split(/\r?\n/).pop() ?? '') as { brand_id?: unknown; brand?: unknown; entries?: unknown }
+      if (typeof parsed.brand_id !== 'string' || typeof parsed.brand !== 'string' || !Array.isArray(parsed.entries)) return null
+      const entries = (parsed.entries as Record<string, unknown>[]).filter(entry =>
+        typeof entry.code === 'string' && typeof entry.name === 'string' && typeof entry.hex === 'string' && /^#[0-9A-F]{6}$/.test(entry.hex) && typeof entry.origin === 'string',
+      ) as { code: string; name: string; hex: string; origin: string }[]
+      return { brandId: parsed.brand_id, brand: parsed.brand, entries }
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * Run one conversion into a fresh output directory.
    * @param input - Host-created absolute path of the stored source image.
    * @param output - Host-created absolute output directory; must not exist yet.
@@ -229,14 +311,14 @@ export class PythonRunner {
     return await this.execute([command.executable, ...command.prefix, ...conversionArgs(this.convertScript, input, output, settings)], cwd, timeoutMs, signal)
   }
 
-  private async execute(argv: readonly string[], cwd: string, timeoutMs: number, signal: AbortSignal): Promise<RunOutcome> {
+  private async execute(argv: readonly string[], cwd: string, timeoutMs: number, signal: AbortSignal, maxBytes: number = LIMITS.maxProcessOutputBytes): Promise<RunOutcome> {
     if (signal.aborted) return { kind: 'cancelled', exitCode: null, stdout: '', stderr: '' }
     let handle: ReturnType<SubprocessLike['spawn']>
     try {
       handle = this.subprocess.spawn({
         argv,
         cwd,
-        stdio: { stdin: 'ignore', stdout: { maxBytes: LIMITS.maxProcessOutputBytes }, stderr: { maxBytes: LIMITS.maxProcessOutputBytes } },
+        stdio: { stdin: 'ignore', stdout: { maxBytes }, stderr: { maxBytes: LIMITS.maxProcessOutputBytes } },
         graceMs: 2000,
         env: CHILD_ENV,
       })
@@ -282,7 +364,8 @@ export function conversionArgs(script: string, input: string, output: string, s:
     '--pack-size', String(s.packSize),
     '--spare-percent', String(s.sparePercent),
   ]
-  if (s.preset !== '') args.push('--preset', s.preset)
+  // `--preset=NAME` keeps a name that starts with '-' from being read as an option.
+  if (s.preset !== '') args.push(`--preset=${s.preset}`)
   return args
 }
 

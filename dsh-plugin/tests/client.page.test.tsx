@@ -18,7 +18,7 @@ const READY: EnvironmentStatus = {
   ready: true,
   problems: [],
   python: { found: true, command: 'python3', version: '3.13.5', configured: false },
-  pillow: { found: true, version: '13.0.0', required: '12.2.0' },
+  pillow: { found: true, version: '13.0.0', required: '13.0.0', minimum: '12.1' },
   engine: { complete: true, missing: [] },
   checkedAt: '2026-11-28T01:00:00.000Z',
 }
@@ -132,7 +132,7 @@ describe('BeadAtlasPage', () => {
     fireEvent.click(screen.getByText(zh['action.generate']))
     expect(await screen.findByText(zh['status.running'])).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/\d+\s*%/)
-    expect(screen.getByText(zh['action.cancel'])).toBeTruthy()
+    expect(await screen.findByText(zh['action.cancel'])).toBeTruthy()
     const request = (api.createJob as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as { fileName: string; dataBase64: string }
     expect(request.fileName).toBe('cat.png')
     expect(request.dataBase64).toBe('iVBORw==')
@@ -162,6 +162,135 @@ describe('BeadAtlasPage', () => {
     fireEvent.click(await screen.findByText(zh['action.cancel']))
     await waitFor(() => { expect(api.cancelJob).toHaveBeenCalled() })
     expect((await screen.findAllByText(zh['status.cancelled'])).length).toBeGreaterThan(0)
+  })
+
+  it('[review 1] keeps Generate disabled while a job is running and explains why', async () => {
+    const running = job({ status: 'running', files: [], summary: null, materials: [], finishedAt: null })
+    const api = fakeApi({ listJobs: vi.fn(async () => ok([running])), getJob: vi.fn(() => new Promise(() => {})) })
+    render(<BeadAtlasPage t={t} api={api} />)
+    await screen.findByText('Python 3.13.5 · Pillow 13.0.0')
+    fireEvent.change(screen.getByLabelText(zh['upload.choose'], { selector: 'input' }), { target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] } })
+    await screen.findByText('a.png')
+    await waitFor(() => { expect((screen.getByText(zh['action.generate']) as HTMLButtonElement).disabled).toBe(true) })
+    fireEvent.click(screen.getByText(zh['action.generate']))
+    expect(api.createJob).not.toHaveBeenCalled()
+  })
+
+  it('[review 2] shows the Pillow upgrade guidance and blocks generation when Pillow is below 12.1', async () => {
+    const api = fakeApi({ getEnvironmentStatus: vi.fn(async () => ok({ ...READY, ready: false, problems: ['pillow-too-old'], pillow: { found: true, version: '11.3.0', required: '13.0.0', minimum: '12.1' } })) })
+    render(<BeadAtlasPage t={t} api={api} />)
+    expect(await screen.findByText('python3 -m pip install --upgrade -r requirements.txt')).toBeTruthy()
+    expect(screen.getByText(zh['env.recheck'])).toBeTruthy()
+    expect((screen.getByText(zh['action.generate']) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('[review 3] resets the submitting state and explains when reading the image fails', async () => {
+    const api = fakeApi()
+    const read = vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader) {
+      setTimeout(() => { this.onerror?.(new ProgressEvent('error') as ProgressEvent<FileReader>) }, 0)
+    })
+    render(<BeadAtlasPage t={t} api={api} />)
+    await screen.findByText('Python 3.13.5 · Pillow 13.0.0')
+    fireEvent.change(screen.getByLabelText(zh['upload.choose'], { selector: 'input' }), { target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] } })
+    await screen.findByText('a.png')
+    fireEvent.click(screen.getByText(zh['action.generate']))
+    expect(await screen.findByText(zh['upload.readFailed'])).toBeTruthy()
+    expect(api.createJob).not.toHaveBeenCalled()
+    await waitFor(() => { expect((screen.getByText(zh['action.generate']) as HTMLButtonElement).disabled).toBe(false) })
+    expect(screen.queryByText(zh['status.running'])).toBeNull()
+    read.mockRestore()
+  })
+
+  it('[review 4] gives the cancel button back when the cancel request fails', async () => {
+    const api = fakeApi({
+      getJob: vi.fn(() => new Promise(() => {})),
+      cancelJob: vi.fn(async () => ({ ok: false, error: { code: 'gateway/disconnected', message: 'offline', details: {} } })),
+    })
+    render(<BeadAtlasPage t={t} api={api} />)
+    await screen.findByText('Python 3.13.5 · Pillow 13.0.0')
+    fireEvent.change(screen.getByLabelText(zh['upload.choose'], { selector: 'input' }), { target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] } })
+    await screen.findByText('a.png')
+    fireEvent.click(screen.getByText(zh['action.generate']))
+    fireEvent.click(await screen.findByText(zh['action.cancel']))
+    await waitFor(() => { expect(api.cancelJob).toHaveBeenCalledTimes(1) })
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    const button = screen.getByText(zh['action.cancel']) as HTMLButtonElement
+    await waitFor(() => { expect(button.disabled).toBe(false) })
+    expect(screen.getAllByText(zh['status.running']).length).toBeGreaterThan(0)
+    fireEvent.click(button)
+    await waitFor(() => { expect(api.cancelJob).toHaveBeenCalledTimes(2) })
+  })
+
+  it('[review 5] keeps tracking (and the cancel button) through a transient status failure', async () => {
+    let calls = 0
+    let release: (value: RpcOutcome<JobRecord>) => void = () => {}
+    const api = fakeApi({
+      getJob: vi.fn(() => {
+        calls++
+        if (calls === 1) return Promise.resolve({ ok: false, error: { code: 'gateway/disconnected', message: 'blip', details: {} } })
+        return new Promise(resolve => { release = resolve })
+      }),
+    })
+    render(<BeadAtlasPage t={t} api={api} pollRetryDelaysMs={[10, 10]} />)
+    await screen.findByText('Python 3.13.5 · Pillow 13.0.0')
+    fireEvent.change(screen.getByLabelText(zh['upload.choose'], { selector: 'input' }), { target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] } })
+    await screen.findByText('a.png')
+    fireEvent.click(screen.getByText(zh['action.generate']))
+    expect(await screen.findByText(t('status.retrying', { attempt: 1, max: 2 }))).toBeTruthy()
+    expect(screen.getByText(zh['action.cancel'])).toBeTruthy()
+    expect(screen.getAllByText(zh['status.running']).length).toBeGreaterThan(0)
+    await waitFor(() => { expect(api.getJob).toHaveBeenCalledTimes(2) })
+    expect(screen.getByText(zh['action.cancel'])).toBeTruthy()
+    await act(async () => { release(ok(job())) })
+    expect(await screen.findByText(zh['materials.title'])).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('[review 5] stops after the retry limit and offers to resume tracking', async () => {
+    const running = job({ status: 'running', files: [], summary: null, materials: [], finishedAt: null })
+    const api = fakeApi({
+      createJob: vi.fn(async () => ok(running)),
+      getJob: vi.fn(async () => ({ ok: false, error: { code: 'gateway/disconnected', message: 'down', details: {} } })),
+    })
+    render(<BeadAtlasPage t={t} api={api} pollRetryDelaysMs={[5, 5]} />)
+    await screen.findByText('Python 3.13.5 · Pillow 13.0.0')
+    fireEvent.change(screen.getByLabelText(zh['upload.choose'], { selector: 'input' }), { target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] } })
+    await screen.findByText('a.png')
+    fireEvent.click(screen.getByText(zh['action.generate']))
+    expect(await screen.findByText(zh['action.resume'])).toBeTruthy()
+    expect(api.getJob).toHaveBeenCalledTimes(3)
+    expect(screen.getByText(zh['action.cancel'])).toBeTruthy()
+  })
+
+  it('[review 7] marks a new pick as decoding and never submits the previous image', async () => {
+    const pending: ((value: { width: number; height: number; close: () => void }) => void)[] = []
+    const original = (globalThis as { createImageBitmap?: unknown }).createImageBitmap
+    ;(globalThis as { createImageBitmap?: unknown }).createImageBitmap = vi.fn(() => new Promise(resolve => { pending.push(resolve) }))
+    try {
+      const api = fakeApi({ getJob: vi.fn(() => new Promise(() => {})) })
+      render(<BeadAtlasPage t={t} api={api} />)
+      await screen.findByText('Python 3.13.5 · Pillow 13.0.0')
+      const input = screen.getByLabelText(zh['upload.choose'], { selector: 'input' })
+      fireEvent.change(input, { target: { files: [new File(['old'], 'old.png', { type: 'image/png' })] } })
+      await waitFor(() => { expect(pending).toHaveLength(1) })
+      await act(async () => { pending[0]?.({ width: 10, height: 10, close: () => {} }) })
+      await waitFor(() => { expect((screen.getByText(zh['action.generate']) as HTMLButtonElement).disabled).toBe(false) })
+      fireEvent.change(screen.getByLabelText(zh['upload.choose'], { selector: 'input' }), { target: { files: [new File(['new'], 'new.png', { type: 'image/png' })] } })
+      expect(await screen.findByText(zh['upload.decoding'])).toBeTruthy()
+      expect(screen.getByText('new.png')).toBeTruthy()
+      expect((screen.getByText(zh['action.generate']) as HTMLButtonElement).disabled).toBe(true)
+      fireEvent.click(screen.getByText(zh['action.generate']))
+      expect(api.createJob).not.toHaveBeenCalled()
+      await act(async () => { pending[1]?.({ width: 20, height: 20, close: () => {} }) })
+      await waitFor(() => { expect((screen.getByText(zh['action.generate']) as HTMLButtonElement).disabled).toBe(false) })
+      fireEvent.click(screen.getByText(zh['action.generate']))
+      await waitFor(() => { expect(api.createJob).toHaveBeenCalledTimes(1) })
+      const request = (api.createJob as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as { fileName: string; dataBase64: string }
+      expect(request.fileName).toBe('new.png')
+      expect(atob(request.dataBase64)).toBe('new')
+    } finally {
+      ;(globalThis as { createImageBitmap?: unknown }).createImageBitmap = original
+    }
   })
 
   it('shows a Host error code as a sentence', async () => {

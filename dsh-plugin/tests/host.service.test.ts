@@ -9,7 +9,10 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS, RESULT_FILES, type JobRecord, type RpcOutcome } from '../src/remote/types.ts'
 import { BeadAtlasService } from '../src/host/bead-atlas-service.ts'
-import { conversionArgs } from '../src/host/python-runner.ts'
+import { conversionArgs, pillowAtLeast } from '../src/host/python-runner.ts'
+import { validateSettings } from '../src/remote/validate.ts'
+import { parseCoordinates } from '../src/remote/csv.ts'
+import { encodeRgbaPng } from '../src/host/png-encode.ts'
 import { NodeSubprocess } from './helpers/node-subprocess.ts'
 import { ENGINE_ROOT, TEST_PYTHON, fakePython, gradientPng, headerOnlyPng, tempDir } from './helpers/fixtures.ts'
 
@@ -84,6 +87,23 @@ describe('environment detection', () => {
     const result = await call<{ problems: string[]; pillow: { required: string } }>(service, 'getEnvironmentStatus', { refresh: true })
     expect(result.ok && result.value.problems).toEqual(['pillow-missing'])
     expect(result.ok && result.value.pillow.required).toMatch(/\d/)
+  })
+
+  it('[review 2] reports pillow-too-old for Pillow below 12.1 before any job runs (simulated interpreter)', async () => {
+    const dir = tempDir('old pillow')
+    fakePython(dir, [3, 12, 1], '11.3.0')
+    const { service } = await makeService({ path: dir })
+    const result = await call<{ ready: boolean; problems: string[]; pillow: { version: string; minimum: string } }>(service, 'getEnvironmentStatus', { refresh: true })
+    expect(result.ok && result.value.ready).toBe(false)
+    expect(result.ok && result.value.problems).toEqual(['pillow-too-old'])
+    expect(result.ok && result.value.pillow.minimum).toBe('12.1')
+    const job = await call(service, 'createJob', jobRequest(gradientPng()))
+    expect(!job.ok && job.error.code).toBe('bead-atlas/environment')
+    expect(pillowAtLeast('12.1.0')).toBe(true)
+    expect(pillowAtLeast('12.0.9')).toBe(false)
+    expect(pillowAtLeast('13.0.0')).toBe(true)
+    expect(pillowAtLeast('12.10')).toBe(true)
+    expect(pillowAtLeast('not-a-version')).toBe(false)
   })
 
   it('never reports the full interpreter path', async () => {
@@ -164,6 +184,27 @@ describe('real conversion', () => {
     const third = await call<JobRecord>(service, 'createJob', jobRequest(gradientPng()))
     expect(third.ok && first.ok && third.value.id !== first.value.id).toBe(true)
     if (third.ok) await service.settled(third.value.id)
+  }, 90_000)
+
+  it('[review 1] reserves the slot before awaiting setup: concurrent requests start one Python conversion', async () => {
+    const { service, subprocess } = await makeService()
+    // Fresh service: the environment is not cached, so both requests would await the probe.
+    const [first, second] = await Promise.all([
+      call<JobRecord>(service, 'createJob', jobRequest(gradientPng())),
+      call<JobRecord>(service, 'createJob', jobRequest(gradientPng())),
+    ])
+    const outcomes = [first, second]
+    expect(outcomes.filter(item => item.ok)).toHaveLength(1)
+    expect(outcomes.filter(item => !item.ok && item.error.code === 'bead-atlas/busy')).toHaveLength(1)
+    const started = outcomes.find(item => item.ok)
+    if (started?.ok) await service.settled(started.value.id)
+    expect(subprocess.spawned.filter(argv => argv.includes('--output'))).toHaveLength(1)
+    // A failed setup releases the slot: an unknown brand fails, then a valid job can start.
+    const bad = await call(service, 'createJob', jobRequest(gradientPng(), { ...DEFAULT_SETTINGS, brand: 'nope' }))
+    expect(!bad.ok && bad.error.code).toBe('bead-atlas/invalid-settings')
+    const next = await call<JobRecord>(service, 'createJob', jobRequest(gradientPng()))
+    expect(next.ok).toBe(true)
+    if (next.ok) await service.settled(next.value.id)
   }, 90_000)
 
   it('records an engine failure (non-zero exit) for an image Pillow cannot decode', async () => {
@@ -322,11 +363,104 @@ describe('history and persistence', () => {
   }, 60_000)
 })
 
+describe('recolor through the engine', () => {
+  it('reads the job palette with the engine and regenerates a recolored grid as a new job', async () => {
+    const { service, subprocess } = await makeService()
+    const created = await call<JobRecord>(service, 'createJob', jobRequest(transparentBorderPng(), { ...DEFAULT_SETTINGS, width: 12, height: 12 }))
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    await service.settled(created.value.id)
+    const original = await call<JobRecord>(service, 'getJob', { jobId: created.value.id })
+    if (!original.ok || original.value.summary === null) throw new Error('original job failed')
+    const { gridWidth: width, gridHeight: height, blankCells } = original.value.summary
+    expect(blankCells).toBeGreaterThan(0)
+    const palette = await call<{ entries: { code: string; hex: string; sameAs: string | null }[] }>(service, 'getPalette', { jobId: created.value.id })
+    expect(palette.ok).toBe(true)
+    if (!palette.ok) return
+    expect(palette.value.entries.length).toBeGreaterThan(100)
+    expect(subprocess.spawned.some(argv => argv.includes('-c') && argv.some(arg => arg.includes('apply_overrides')))).toBe(true)
+    const coordinates = await call<{ dataBase64: string }>(service, 'getResultFile', { jobId: created.value.id, name: 'coordinates.csv' })
+    if (!coordinates.ok) throw new Error('no coordinates')
+    const grid = parseCoordinates(Buffer.from(coordinates.value.dataBase64, 'base64').toString('utf8'), width, height)
+    expect(grid).not.toBeNull()
+    const target = palette.value.entries.find(entry => entry.sameAs === null && !grid!.some(cell => cell.code === entry.code))
+    if (target === undefined) throw new Error('no unused palette entry')
+    const firstCode = grid!.find(cell => cell.code !== null)!.code!
+    // Replace every bead of the first code; keep empty cells empty.
+    const cells = grid!.map(cell => (cell.code === null ? '' : cell.code === firstCode ? target.code : cell.code))
+    const edited = await call<JobRecord>(service, 'createEditedJob', { jobId: created.value.id, width, height, cells })
+    expect(edited.ok).toBe(true)
+    if (!edited.ok) return
+    expect(edited.value.editedFrom).toBe(created.value.id)
+    await service.settled(edited.value.id)
+    const done = await call<JobRecord>(service, 'getJob', { jobId: edited.value.id })
+    expect(done.ok && done.value.status).toBe('succeeded')
+    if (!done.ok) return
+    expect([...done.value.files].sort()).toEqual([...RESULT_FILES].sort())
+    expect(done.value.editCheck).toEqual({ cells: width * height, mismatched: 0 })
+    expect(done.value.summary?.blankCells).toBe(blankCells)
+    expect(done.value.materials.some(row => row.code === target.code)).toBe(true)
+    expect(done.value.materials.some(row => row.code === firstCode)).toBe(false)
+    const originalAgain = await call<JobRecord>(service, 'getJob', { jobId: created.value.id })
+    expect(originalAgain.ok && originalAgain.value.materials).toEqual(original.value.materials)
+  }, 120_000)
+
+  it('rejects a recolor request with a wrong size or an unknown code', async () => {
+    const { service } = await makeService()
+    const created = await call<JobRecord>(service, 'createJob', jobRequest(gradientPng(), { ...DEFAULT_SETTINGS, height: 4 }))
+    if (!created.ok) throw new Error('job failed')
+    await service.settled(created.value.id)
+    const done = await call<JobRecord>(service, 'getJob', { jobId: created.value.id })
+    if (!done.ok || done.value.summary === null) throw new Error('job failed')
+    const { gridWidth: width, gridHeight: height } = done.value.summary
+    const size = await call(service, 'createEditedJob', { jobId: created.value.id, width: width - 1, height, cells: Array((width - 1) * height).fill('') })
+    expect(!size.ok && size.error.code).toBe('bead-atlas/bad-request')
+    const unknown = await call(service, 'createEditedJob', { jobId: created.value.id, width, height, cells: Array(width * height).fill('NOT-A-CODE') })
+    expect(!unknown.ok && unknown.error.code).toBe('bead-atlas/invalid-settings')
+  }, 90_000)
+})
+
+describe('preset names', () => {
+  it('[review 6] accepts every name convert.py accepts, including + and names over 40 characters', () => {
+    const long = 'warm-palette-for-winter-sunset-portraits-v2-final'
+    expect(long.length).toBeGreaterThan(40)
+    for (const preset of ['palette+warm', long, '默认1', 'a&b (copy)', 'x'.repeat(1024)]) {
+      expect(validateSettings({ ...DEFAULT_SETTINGS, preset }).ok).toBe(true)
+    }
+    // convert.py preset_path() strips \ / : * ? " < > | and whitespace; nothing left means invalid.
+    for (const preset of ['///', ' :* ', 'bad\u0000name', 'line\nbreak', 'x'.repeat(1025)]) {
+      expect(validateSettings({ ...DEFAULT_SETTINGS, preset }).ok).toBe(false)
+    }
+    const argv = conversionArgs('/pkg/scripts/convert.py', '/in.png', '/out', { ...DEFAULT_SETTINGS, preset: '-starts-with-dash' })
+    expect(argv).toContain('--preset=-starts-with-dash')
+  })
+})
+
+describe('png encoder', () => {
+  it('writes a PNG Pillow can read with the exact pixels', () => {
+    const png = encodeRgbaPng(2, 1, new Uint8Array([255, 0, 0, 255, 0, 0, 0, 0]))
+    expect(png.subarray(1, 4).toString()).toBe('PNG')
+  })
+})
+
+/** RGBA PNG: coloured centre, fully transparent 2-pixel border. */
+function transparentBorderPng(size = 24): Buffer {
+  const rgba = new Uint8Array(size * size * 4)
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const at = (y * size + x) * 4
+      const inside = x >= 2 && y >= 2 && x < size - 2 && y < size - 2
+      rgba.set(inside ? [Math.round((x / size) * 255), Math.round((y / size) * 255), 90, 255] : [0, 0, 0, 0], at)
+    }
+  }
+  return encodeRgbaPng(size, size, rgba)
+}
+
 describe('argv', () => {
   it('builds an explicit argv with no shell', () => {
     const argv = conversionArgs('/pkg/scripts/convert.py', '/data/in.png', '/data/out', { ...DEFAULT_SETTINGS, preset: '默认1' })
     expect(argv.slice(0, 4)).toEqual(['/pkg/scripts/convert.py', '/data/in.png', '--output', '/data/out'])
-    expect(argv).toContain('--preset')
+    expect(argv).toContain('--preset=默认1')
     expect(argv.join(' ')).not.toMatch(/[;&|`$]/)
   })
 })
