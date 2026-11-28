@@ -1,13 +1,18 @@
 {
-  "name": "ymzz-bead-atlas",
+  "name": "@ymzz/bead-atlas",
   "version": "0.1.0",
-  "private": true,
   "description": "YMZZ Bead Atlas DSH GUI plugin: turn an image into a bead pattern inside DeepSeek Harness, using the bundled Python engine.",
   "license": "MIT",
   "author": "晏銘湛箴 / YanMing Cao",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Ya-MiC/ymzz-bead-atlas.git"
+  },
+  "homepage": "https://github.com/Ya-MiC/ymzz-bead-atlas#readme",
+  "bugs": "https://github.com/Ya-MiC/ymzz-bead-atlas/issues",
+  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "perler-beads", "bead-pattern"],
+  "publishConfig": {
+    "access": "public"
   },
   "icon": "./dsh-plugin/icon.svg",
   "type": "module",

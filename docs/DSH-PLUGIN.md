@@ -1,6 +1,6 @@
 # Bead Atlas DSH 插件說明
 
-這份文件說明 `ymzz-bead-atlas` 作為 DeepSeek Harness（DSH）插件包時的結構、資料流、安全邊界與已知限制。Skill 本身的用法見 `README.md` 與 `SKILL.md`，兩者互不影響。
+這份文件說明本倉庫（npm 套件名 `@ymzz/bead-atlas`）作為 DeepSeek Harness（DSH）插件包時的結構、資料流、安全邊界與已知限制。Skill 本身的用法見 `README.md` 與 `SKILL.md`，兩者互不影響。
 
 ## 1. 狀態
 
