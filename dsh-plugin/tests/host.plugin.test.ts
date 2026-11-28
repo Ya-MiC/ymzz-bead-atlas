@@ -8,15 +8,25 @@ describe('host plugin entry', () => {
     process.env.DSH_HOME = tempDir('dsh home')
     const { apply, inject, name } = await import('../src/host/index.ts')
     expect(name).toBe('bead-atlas')
-    expect(inject).toEqual(['subprocess', 'connection'])
+    expect(inject).toEqual(['subprocess', 'connection', 'webServer'])
     let channel = ''
     let handler: ((endpoint: string, payload: unknown, signal: AbortSignal, peer: { principal: { kind: string } }) => Promise<unknown>) | undefined
     const disposers: (() => unknown)[] = []
-    await apply({
+    const injected: string[][] = []
+    apply({
       subprocess: new NodeSubprocess(),
-      connection: { rpc: { handle: (name, fn) => { channel = name; handler = fn; return async () => {} } } },
+      inject: (deps, callback) => {
+        injected.push([...deps])
+        callback({
+          connection: { admit: () => ({ rejection: 401 }), rpc: { handle: (name, fn) => { channel = name; handler = fn; return () => {} } } },
+          webServer: { register: () => { throw new Error('must not mount the fallback route when rpc.handle works') } },
+          effect: () => undefined,
+        })
+        return undefined
+      },
       effect: (factory) => { disposers.push(factory()); return undefined },
     })
+    expect(injected).toEqual([['connection', 'webServer']])
     expect(channel).toBe('/bead-atlas')
     const signal = new AbortController().signal
     const guest = await handler?.('listJobs', {}, signal, { principal: { kind: 'guest' } }) as { ok: boolean; error?: { code: string } }
