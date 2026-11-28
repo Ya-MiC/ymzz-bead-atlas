@@ -70,3 +70,36 @@ python scripts/convert.py "圖片路徑" --output "輸出資料夾" --preset "�
 ## 7. 授權與來源
 
 MIT。色卡資料來自 maxcleme/beadcolors（MIT），逐檔雜湊與完整授權見 `NOTICE.md`。參考專案與 REA 取證說明見 `docs/evidence.md`。
+
+## 8. Install Bead Atlas in DSH（在 DeepSeek Harness 裡用圖形介面）
+
+上面的 Skill 用法不變。另外，這個倉庫也是一個 DSH（DeepSeek Harness）插件包：裝好後，DSH 左側導航會出現「拼豆圖譜」，可以選圖、調設定、生成、預覽、下載，不需要敲命令。
+
+> 目前狀態：**尚未發佈到 npm 或 DSH 插件市場**，只能用本機打包的檔案安裝。已在 Linux 上的 DSH Web 0.2.2-rc.5 實測；DSH 桌面版、macOS、Windows 尚未驗證。
+
+需要：
+
+1. DSH 0.2.2-rc.5 以上、0.3 以下（`npm install @deepseek-ai/dsh`），以及 `PATH` 上可用的 `pnpm`（DSH 安裝插件時會呼叫它）。
+2. Python 3.10 以上，並已安裝 Pillow（`python -m pip install -r requirements.txt`）。插件不會替你安裝 Python 或 Pillow；找不到時面板會說明該怎麼做，也可以在面板裡填 Python 執行檔的絕對路徑。
+3. Node 24.9 以上（DSH 本身的要求，打包也用同一個 Node）。
+
+步驟：
+
+```bash
+# 1. 在本倉庫打包插件（產生 ymzz-bead-atlas-0.1.0.tgz，內含 Python 引擎與色卡）
+pnpm install
+pnpm run build
+npm pack
+
+# 2. 安裝到 DSH 的 profile（以 web 為例），安裝後會自動啟用
+dsh plugin --profile web add /絕對路徑/ymzz-bead-atlas-0.1.0.tgz
+
+# 3. 重新啟動 DSH
+dsh web
+```
+
+使用：打開 DSH → 左側「拼豆圖譜」→ 選擇或拖入圖片 → 調整品牌、寬度、顏色數等 → 「生成拼豆圖紙」→ 預覽效果圖、逐格圖紙、SVG → 下載七種檔案中的任何一種。任務紀錄保存在 `$DSH_HOME/bead-atlas/`（未設定 `DSH_HOME` 時為 `~/.dsh/bead-atlas/`），重新啟動 DSH 後仍在。
+
+移除：`dsh plugin --profile web remove ymzz-bead-atlas`。任務紀錄不會自動刪除，需要時自行刪除 `$DSH_HOME/bead-atlas/`。
+
+技術細節、安全邊界與已知限制見 [`docs/DSH-PLUGIN.md`](docs/DSH-PLUGIN.md)。
