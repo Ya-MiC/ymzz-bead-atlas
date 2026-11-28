@@ -54,7 +54,7 @@
   ],
   "scripts": {
     "build": "node dsh-plugin/scripts/build.mjs",
-    "typecheck": "tsc -p dsh-plugin/tsconfig.json --noEmit && tsc -p dsh-plugin/tsconfig.client.json --noEmit",
+    "typecheck": "tsc -p dsh-plugin/tsconfig.json --noEmit && tsc -p dsh-plugin/tsconfig.client.json --noEmit && tsc -p dsh-plugin/tsconfig.tests.json --noEmit",
     "test": "vitest run --config dsh-plugin/vitest.config.ts",
     "test:python": "python -m unittest discover -s tests -v"
   },
