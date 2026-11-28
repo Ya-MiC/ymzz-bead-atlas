@@ -28,7 +28,7 @@ export function MaterialsTable({ t, materials, edited = false }: MaterialsTableP
         </thead>
         <tbody>
           {materials.map(row => (
-            <tr key={`${row.code}-${row.referenceHex}`}>
+            <tr key={edited ? `${row.code}-${row.beadCount}` : `${row.code}-${row.referenceHex}`} data-settle={edited || undefined}>
               <td>
                 <span className={css.swatchCell}>
                   <span className={css.swatch} style={{ backgroundColor: row.referenceHex }} aria-hidden="true" />

@@ -6,6 +6,13 @@
 
 把原本需要敲命令的 Skill，加上一個可以安裝在 DeepSeek Harness（DSH）裡的圖形化插件，npm 套件名 `@ymzz/bead-atlas`。
 
+
+### 介面節奏（參考 Awwwards 得獎作品常見原則與 NN/g 動效時長研究）
+- 更省空間：環境狀態移到標題右側、上傳預覽縮小、互動圖紙欄加寬（480→544 px）、統計卡更緊湊、材料表最高 360 px 並固定表頭；生成後整頁高度約少 326 px。
+- 引導注意力但不搶畫面：生成完成後不自動捲動，改在「生成拼豆圖紙」旁出現「已完成 · 查看結果 ↓」，點了才平滑捲到結果（減少動態時直接跳）；結果以 240 ms 淡入加 6 px 落定出現。
+- 改色回饋：數量有變的材料列以淡天青底色 400 ms 退去；「重新生成」區塊以 240 ms 淡入出現。
+- 動效統一：全部改用文潤 `--ease-ink`（cubic-bezier(.16,1,.3,1)）與 motion.js 的 120 / 240 / 400 ms；分頁、色卡按鈕、歷史列加 120 ms 狀態過渡；提示框 120 ms 淡入。`prefers-reduced-motion: reduce` 時以上動畫全部關閉。
+
 ### 新增
 1. **DSH 插件包**：同一個套件兼任 DSH bundle（`dsh-plugin/cordis.patch.yml`）與插件（Host + Client）。左側導航「拼豆圖譜」與主面板共用 panel id `bead-atlas`。支援 DSH 0.2.2-rc.5 以上、0.3 以下。
 2. **Host（本機服務）**：偵測 Python ≥ 3.10、Pillow ≥ 12.1 與引擎檔案；驗證圖片（格式魔數、15 MB、單邊 12000 px、4000 萬像素）；每個任務獨立資料夾；用 DSH 的 subprocess 服務以明確 argv 執行 `convert.py`（不經 shell、逾時 120 秒、輸出上限、可取消）；任務紀錄與設定存在 `$DSH_HOME/bead-atlas/`；所有端點只給本機擁有者使用。

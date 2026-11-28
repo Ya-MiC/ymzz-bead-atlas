@@ -160,6 +160,9 @@ export function BeadAtlasPage({ t, api, pollRetryDelaysMs = POLL_RETRY_DELAYS_MS
   const [message, setMessage] = useState<string | null>(null)
   const [pollNote, setPollNote] = useState<string | null>(null)
   const [edits, setEdits] = useState<GridEdits | null>(null)
+  /** Job that finished in this session and has not been looked at yet; offers "view result" instead of moving the page. */
+  const [justFinished, setJustFinished] = useState<string | null>(null)
+  const resultHeading = useRef<HTMLHeadingElement>(null)
   /** True while a newly picked image is being decoded; Generate waits for it. */
   const [decoding, setDecoding] = useState(false)
   const life = useRef<AbortController | null>(null)
@@ -218,7 +221,10 @@ export function BeadAtlasPage({ t, api, pollRetryDelaysMs = POLL_RETRY_DELAYS_MS
         failures = 0
         setPollNote(null)
         setCurrent(result.value)
-        if (result.value.status !== 'running') break
+        if (result.value.status !== 'running') {
+          if (result.value.status === 'succeeded') setJustFinished(jobId)
+          break
+        }
       }
     } finally {
       if (following.current === jobId) following.current = null
@@ -281,6 +287,7 @@ export function BeadAtlasPage({ t, api, pollRetryDelaysMs = POLL_RETRY_DELAYS_MS
     const bad = invalidField(chosen)
     if (bad !== null) { setMessage(t('settings.invalid', { field: bad })); return }
     setPhase('submitting')
+    setJustFinished(null)
     let dataBase64: string
     try {
       dataBase64 = await fileToBase64(source.file)
@@ -410,6 +417,20 @@ export function BeadAtlasPage({ t, api, pollRetryDelaysMs = POLL_RETRY_DELAYS_MS
             )}
           </>
         )}
+        {justFinished !== null && justFinished === current?.id && phase === 'idle' && (
+          <button
+            type="button"
+            className={css.jumpLink}
+            onClick={() => {
+              const reduce = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+              resultHeading.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+              resultHeading.current?.focus({ preventScroll: true })
+              setJustFinished(null)
+            }}
+          >
+            {t('action.viewResult')}
+          </button>
+        )}
         {decoding && <span className={css.muted} role="status">{t('upload.decoding')}</span>}
         {phase === 'idle' && jobRunning && (
           <>
@@ -424,7 +445,7 @@ export function BeadAtlasPage({ t, api, pollRetryDelaysMs = POLL_RETRY_DELAYS_MS
 
       <section className={css.card} aria-labelledby="bead-atlas-result-title" aria-live="polite">
         <div className={css.cardHeader}>
-          <h2 id="bead-atlas-result-title" className={css.cardTitle}>{t('result.title')}</h2>
+          <h2 id="bead-atlas-result-title" className={css.cardTitle} ref={resultHeading} tabIndex={-1}>{t('result.title')}</h2>
           {current !== null && <span className={css.status} data-status={current.status}>{t(statusKey(current.status))}</span>}
         </div>
         {current === null && <p className={css.muted}>{t('result.empty')}</p>}
@@ -432,7 +453,7 @@ export function BeadAtlasPage({ t, api, pollRetryDelaysMs = POLL_RETRY_DELAYS_MS
           <p className={css.errorText} role="alert">{failureText}</p>
         )}
         {current !== null && current.status === 'succeeded' && (
-          <div className={css.resultLayout}>
+          <div className={css.resultLayout} key={current.id} data-reveal>
             <ImagePreview t={t} api={api} job={current} busy={working || jobRunning} onEdits={setEdits} onRegenerate={regenerateEdited} />
             <div className={css.resultSide}>
               {current.editedFrom !== undefined && (

@@ -173,6 +173,12 @@ describe('BeadAtlasPage', () => {
     expect(request.dataBase64).toBe('iVBORw==')
     await act(async () => { release(ok(job())) })
     expect(await screen.findByText(zh['materials.title'])).toBeTruthy()
+    // The finished result is offered with a link instead of moving the page.
+    const jump = await screen.findByText(zh['action.viewResult'])
+    Element.prototype.scrollIntoView = vi.fn()
+    fireEvent.click(jump)
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled()
+    expect(screen.queryByText(zh['action.viewResult'])).toBeNull()
     expect(within(screen.getByRole('table')).getByText('#FFFFFF')).toBeTruthy()
     expect(screen.getByText('1,728')).toBeTruthy()
     const downloads = screen.getByRole('region', { name: zh['downloads.title'] })
